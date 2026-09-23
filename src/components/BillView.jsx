@@ -1,22 +1,31 @@
 import React, { useState } from 'react';
 import { useApp } from '../Store';
-import { Plus, Trash2, Users, Receipt } from 'lucide-react';
+import { Plus, Trash2, Users, Receipt, Search } from 'lucide-react';
 
 export default function BillView() {
-  const { bill, updateBillDetails, addParticipant, removeParticipant, addItem, removeItem, toggleItemAssignment } = useApp();
+  const { user, registeredUsers, rooms, activeRoomId, updateBillDetails, addItem, removeItem, toggleItemAssignment, addMemberToRoom, removeMemberFromRoom } = useApp();
+  const room = rooms[activeRoomId];
+  const bill = room?.bill;
   
-  const [newParticipant, setNewParticipant] = useState('');
   const [newItemName, setNewItemName] = useState('');
   const [newItemPrice, setNewItemPrice] = useState('');
   const [newItemTaxable, setNewItemTaxable] = useState(true);
+  
+  const [searchQuery, setSearchQuery] = useState('');
 
-  const handleAddParticipant = (e) => {
-    e.preventDefault();
-    if (newParticipant.trim()) {
-      addParticipant(newParticipant.trim());
-      setNewParticipant('');
-    }
-  };
+  if (!room) return null;
+
+  // Search logic for adding members
+  const searchResults = Object.keys(registeredUsers).map(username => ({
+    username,
+    ...registeredUsers[username]
+  })).filter(u => {
+    if (room.members.includes(u.username)) return false; 
+    if (!searchQuery.trim()) return false;
+    const q = searchQuery.toLowerCase();
+    return (u.username && u.username.toLowerCase().includes(q)) || (u.uid && u.uid.toLowerCase().includes(q));
+  });
+
 
   const handleAddItem = (e) => {
     e.preventDefault();
@@ -73,29 +82,61 @@ export default function BillView() {
       {/* Participants */}
       <div className="glass-panel">
         <h2 className="flex-center" style={{justifyContent: 'flex-start', gap: '0.5rem'}}>
-          <Users size={24} /> Người tham gia
+          <Users size={24} /> Thành viên nhóm
         </h2>
-        <form onSubmit={handleAddParticipant} className="flex-between mb-4" style={{ gap: '0.5rem' }}>
-          <input 
-            type="text" 
-            placeholder="Nhập tên người..." 
-            value={newParticipant}
-            onChange={(e) => setNewParticipant(e.target.value)}
-          />
-          <button type="submit" className="btn btn-primary" style={{ width: 'auto' }}>
-            <Plus size={20} /> Thêm
-          </button>
-        </form>
         
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-          {bill.participants.map(p => (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '1rem', marginBottom: '1rem' }}>
+          {room.members.map(p => (
             <div key={p} className="badge" style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', padding: '0.5rem 0.75rem', fontSize: '0.9rem' }}>
               {p}
-              <Trash2 size={14} style={{ cursor: 'pointer', color: 'var(--danger)' }} onClick={() => removeParticipant(p)} />
+              {p !== user.username && <Trash2 size={14} style={{ cursor: 'pointer', color: 'var(--danger)' }} onClick={() => removeMemberFromRoom(activeRoomId, p)} />}
             </div>
           ))}
-          {bill.participants.length === 0 && <p className="text-muted">Chưa có ai tham gia.</p>}
         </div>
+
+        <div className="input-group mb-2">
+          <div style={{ position: 'relative' }}>
+            <Search size={18} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+            <input 
+              type="text" 
+              placeholder="Thêm thành viên (tìm theo Tên/ID)..." 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{ paddingLeft: '35px' }}
+            />
+          </div>
+        </div>
+
+        {searchQuery && (
+          <div style={{ background: 'rgba(255,255,255,0.4)', borderRadius: '0.5rem', padding: '0.5rem', maxHeight: '150px', overflowY: 'auto' }}>
+            {searchResults.length === 0 ? (
+              <p className="text-muted text-center" style={{ fontSize: '0.9rem', margin: '0.5rem 0' }}>Không tìm thấy ai</p>
+            ) : (
+              searchResults.map(u => (
+                <div 
+                  key={u.username}
+                  className="flex-between"
+                  style={{ 
+                    padding: '0.5rem 1rem', 
+                    borderRadius: '0.25rem', 
+                    cursor: 'pointer',
+                    background: 'transparent',
+                    marginBottom: '2px'
+                  }}
+                  onClick={() => {
+                    addMemberToRoom(activeRoomId, u.username);
+                    setSearchQuery('');
+                  }}
+                >
+                  <div>
+                    <strong>{u.username}</strong> <span style={{ fontSize: '0.8rem', opacity: 0.8 }}>{u.uid}</span>
+                  </div>
+                  <Plus size={16} color="var(--primary)" />
+                </div>
+              ))
+            )}
+          </div>
+        )}
       </div>
 
       {/* Items */}
@@ -158,7 +199,7 @@ export default function BillView() {
               <div style={{ marginTop: '0.5rem' }}>
                 <p style={{ fontSize: '0.85rem', marginBottom: '0.5rem' }}>Ai đã ăn món này?</p>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                  {bill.participants.map(p => {
+                  {room.members.map(p => {
                     const isAssigned = item.assignedTo.includes(p);
                     return (
                       <div 
@@ -171,7 +212,6 @@ export default function BillView() {
                       </div>
                     );
                   })}
-                  {bill.participants.length === 0 && <span className="text-muted" style={{fontSize: '0.8rem'}}>Hãy thêm người tham gia trước</span>}
                 </div>
               </div>
             </div>

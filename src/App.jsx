@@ -4,31 +4,50 @@ import LoginView from './components/LoginView';
 import ProfileView from './components/ProfileView';
 import BillView from './components/BillView';
 import SummaryView from './components/SummaryView';
-import { Receipt, PieChart, User, LogOut } from 'lucide-react';
+import GroupsView from './components/GroupsView';
+import AdminView from './components/AdminView';
+import FallingDogs from './components/FallingDogs';
+import DebtView from './components/DebtView';
+import { Receipt, PieChart, User, ArrowLeft, Wallet } from 'lucide-react';
 
 function App() {
-  const { user, logout } = useApp();
+  const { user, activeRoomId, setActiveRoomId, rooms } = useApp();
   const [activeTab, setActiveTab] = useState('bill'); // 'bill', 'summary', 'profile'
 
   if (!user) {
     return <LoginView />;
   }
 
+  if (user.username === 'admin') {
+    return <AdminView />;
+  }
+
+  if (!activeRoomId) {
+    return <GroupsView />;
+  }
+
+  const currentRoom = rooms[activeRoomId];
+
   return (
-    <div style={{ width: '100%', paddingBottom: '80px' }}>
-      <header className="flex-between mb-4" style={{ padding: '1rem', background: 'var(--glass-bg)', borderRadius: '1rem', border: '1px solid var(--glass-border)' }}>
-        <div>
-          <h1 style={{ fontSize: '1.5rem', marginBottom: 0 }}>Split Bill</h1>
-          <p style={{ fontSize: '0.8rem', margin: 0 }}>Xin chào, <strong style={{color: 'var(--primary)'}}>{user.username}</strong>!</p>
+    <>
+      <FallingDogs />
+      <div style={{ width: '100%', paddingBottom: '80px', position: 'relative', zIndex: 10 }}>
+        <header className="flex-between mb-4" style={{ padding: '1rem', background: 'var(--glass-bg)', borderRadius: '1rem', border: '1px solid var(--glass-border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <button onClick={() => setActiveRoomId(null)} className="btn" style={{ width: 'auto', padding: '0.5rem', background: 'transparent', color: 'var(--text-muted)' }}>
+            <ArrowLeft size={20} />
+          </button>
+          <div>
+            <h1 style={{ fontSize: '1.2rem', marginBottom: 0 }}>{currentRoom?.name || 'Nhóm'}</h1>
+            <p style={{ fontSize: '0.75rem', margin: 0, color: 'var(--text-muted)' }}>{currentRoom?.members.length} thành viên</p>
+          </div>
         </div>
-        <button onClick={logout} className="btn" style={{ width: 'auto', padding: '0.5rem', background: 'transparent', color: 'var(--text-muted)' }}>
-          <LogOut size={20} />
-        </button>
       </header>
 
       <main>
         {activeTab === 'bill' && <BillView />}
         {activeTab === 'summary' && <SummaryView />}
+        {activeTab === 'debt' && <DebtView />}
         {activeTab === 'profile' && <ProfileView />}
       </main>
 
@@ -60,6 +79,12 @@ function App() {
             label="Tổng kết" 
           />
           <NavButton 
+            active={activeTab === 'debt'} 
+            onClick={() => setActiveTab('debt')} 
+            icon={<Wallet />} 
+            label="Tiền nợ" 
+          />
+          <NavButton 
             active={activeTab === 'profile'} 
             onClick={() => setActiveTab('profile')} 
             icon={<User />} 
@@ -68,6 +93,7 @@ function App() {
         </div>
       </nav>
     </div>
+  </>
   );
 }
 

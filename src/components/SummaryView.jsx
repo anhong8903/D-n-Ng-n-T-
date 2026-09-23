@@ -3,29 +3,32 @@ import { useApp } from '../Store';
 import { QrCode, ChevronDown, ChevronUp } from 'lucide-react';
 
 export default function SummaryView() {
-  const { user, bill, calculateTotals } = useApp();
+  const { user, rooms, activeRoomId, calculateTotals } = useApp();
+  const room = rooms[activeRoomId];
+  const bill = room?.bill;
   const totals = calculateTotals();
   const [expanded, setExpanded] = useState({});
+
+  if (!room) return null;
 
   const toggleExpand = (p) => {
     setExpanded(prev => ({ ...prev, [p]: !prev[p] }));
   };
 
-  const payerBank = user?.bankName?.trim();
-  const payerAccount = user?.bankAccount?.trim();
-  const canGenerateQR = payerBank && payerAccount;
+  const hasQrInfo = user.bankBin && user.bankAccount;
+  const hasStaticQr = !!user?.qrImage?.trim();
 
   return (
     <div className="animate-slide-up">
       <h2 className="text-center mb-4">Tổng Kết Thanh Toán</h2>
       
-      {bill.participants.length === 0 && (
+      {room.members.length === 0 && (
         <div className="glass-panel text-center">
           <p>Chưa có ai tham gia để tính toán.</p>
         </div>
       )}
 
-      {bill.participants.map(p => {
+      {room.members.map(p => {
         const total = totals[p].total;
         const isMe = p === user.username;
         const isExpanded = expanded[p];
@@ -73,22 +76,24 @@ export default function SummaryView() {
                 </div>
 
                 {!isMe && total > 0 && (
-                  <div style={{ marginTop: '1rem', textAlign: 'center', background: 'rgba(0,0,0,0.2)', padding: '1rem', borderRadius: '1rem' }}>
-                    <h4 style={{ marginBottom: '1rem' }}><QrCode size={18} style={{display:'inline', marginRight:'0.5rem'}}/> Quét mã trả tiền</h4>
-                    {canGenerateQR ? (
+                  <div style={{ marginTop: '1rem', textAlign: 'center', background: 'rgba(255,255,255,0.4)', padding: '1rem', borderRadius: '1rem' }}>
+                    <h4 style={{ marginBottom: '1rem', color: 'var(--primary)' }}><QrCode size={18} style={{display:'inline', marginRight:'0.5rem'}}/> Quét mã trả tiền</h4>
+                    {hasQrInfo ? (
                       <>
                         <img 
-                          src={`https://img.vietqr.io/image/${payerBank}-${payerAccount}-compact2.png?amount=${Math.round(total)}&addInfo=Tra tien ${bill.name} cho ${user.username}&accountName=${user.username}`} 
+                          src={`https://img.vietqr.io/image/${user.bankBin}-${user.bankAccount}-compact2.png?amount=${Math.round(total)}&addInfo=Tra tien cho ${user.username}&accountName=${user.username}`} 
                           alt="QR Code" 
                           style={{ width: '100%', maxWidth: '250px', borderRadius: '0.5rem' }} 
                         />
                         <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
-                          NH: {payerBank} | STK: {payerAccount}
+                          NH: {user.bankBin} | STK: {user.bankAccount}
                         </p>
                       </>
+                    ) : hasStaticQr ? (
+                      <img src={user.qrImage} alt="QR Code" style={{ width: '100%', maxWidth: '250px', borderRadius: '0.5rem' }} />
                     ) : (
                       <p style={{ fontSize: '0.9rem', color: 'var(--danger)' }}>
-                        Người tạo hóa đơn chưa cập nhật thông tin ngân hàng.
+                        Người nhận chưa cập nhật mã QR.
                       </p>
                     )}
                   </div>

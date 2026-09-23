@@ -8,17 +8,21 @@ export default function LoginView() {
   const [username, setUsername] = useState('');
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
 
   const handleSubmit = (e) => {
     e.preventDefault();
     setError('');
+    setSuccessMessage('');
     
     if (username.trim() && pin.trim()) {
       if (isRegistering) {
         const res = register(username.trim(), pin.trim());
         if (res.success) {
-          // auto login after register
-          login(username.trim(), pin.trim());
+          setSuccessMessage(`Đăng ký thành công! ID của bạn là ${res.uid}. Đang tự động đăng nhập...`);
+          setTimeout(() => {
+            login(username.trim(), pin.trim());
+          }, 2500);
         } else {
           setError(res.message);
         }
@@ -41,6 +45,7 @@ export default function LoginView() {
       </p>
       
       {error && <div className="mb-4" style={{ color: 'var(--danger)', fontSize: '0.9rem', textAlign: 'center' }}>{error}</div>}
+      {successMessage && <div className="mb-4 p-2" style={{ backgroundColor: 'rgba(34, 197, 94, 0.1)', color: '#4ade80', fontSize: '0.9rem', textAlign: 'center', border: '1px solid rgba(34, 197, 94, 0.5)', borderRadius: '0.5rem' }}>{successMessage}</div>}
       
       <form onSubmit={handleSubmit}>
         <div className="input-group">
@@ -72,7 +77,7 @@ export default function LoginView() {
       
       <div className="text-center mt-4">
         <button 
-          onClick={() => { setIsRegistering(!isRegistering); setError(''); }} 
+          onClick={() => { setIsRegistering(!isRegistering); setError(''); setSuccessMessage(''); }} 
           style={{ background: 'transparent', border: 'none', color: 'var(--accent)', cursor: 'pointer', textDecoration: 'underline' }}
         >
           {isRegistering ? 'Đã có tài khoản? Đăng nhập ngay' : 'Chưa có tài khoản? Tạo mới'}
