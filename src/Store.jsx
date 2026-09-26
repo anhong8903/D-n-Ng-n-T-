@@ -1,95 +1,138 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { supabase } from './supabaseClient';
 
 const AppContext = createContext();
 
 export function AppProvider({ children }) {
   const [user, setUser] = useState(() => {
     const saved = localStorage.getItem('split_bill_user');
-    let u = saved ? JSON.parse(saved) : null; 
-    
-    // Cập nhật UID cho phiên đăng nhập cũ
-    if (u && !u.uid) {
-       const savedUsers = localStorage.getItem('split_bill_users');
-       const parsedUsers = savedUsers ? JSON.parse(savedUsers) : {};
-       if (parsedUsers[u.username] && parsedUsers[u.username].uid) {
-           u.uid = parsedUsers[u.username].uid;
-       } else {
-           u.uid = '#' + Math.floor(1000 + Math.random() * 9000).toString();
-       }
-       localStorage.setItem('split_bill_user', JSON.stringify(u));
-    }
-    return u;
+    return saved ? JSON.parse(saved) : null; 
   });
 
-  const [registeredUsers, setRegisteredUsers] = useState(() => {
-    const saved = localStorage.getItem('split_bill_users');
-    let users = saved ? JSON.parse(saved) : {}; // { username: { uid, pin, bankName, bankAccount } }
-    
-    // Tự động cấp ID cho những tài khoản cũ chưa có
-    let modified = false;
-    Object.keys(users).forEach(username => {
-      if (!users[username].uid) {
-        users[username].uid = '#' + Math.floor(1000 + Math.random() * 9000).toString();
-        modified = true;
-      }
-    });
-
-    // Tạo sẵn tài khoản admin nếu chưa có
-    if (!users['admin']) {
-      users['admin'] = { uid: '#ADMIN', pin: 'admin', bankName: '', bankAccount: '' };
-      modified = true;
-    }
-
-    if (modified) {
-      localStorage.setItem('split_bill_users', JSON.stringify(users));
-    }
-    
-    return users;
-  });
-
-  const [rooms, setRooms] = useState(() => {
-    const saved = localStorage.getItem('split_bill_rooms');
-    return saved ? JSON.parse(saved) : {}; 
-    // { roomId: { id, name, members: ['username1'], bill: { name, vat, tip, items: [] } } }
-  });
-
+  const [registeredUsers, setRegisteredUsers] = useState({});
+  const [rooms, setRooms] = useState({});
   const [activeRoomId, setActiveRoomId] = useState(null);
+  const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
-    if (user) localStorage.setItem('split_bill_user', JSON.stringify(user));
+    const fetchInitialData = async () => {
+      const { data: usersData } = await supabase.from('users').select('*');
+      const { data: roomsData } = await supabase.from('rooms').select('*');
+      
+      const usersMap = {};
+      usersData?.forEach(u => usersMap[u.username] = u.data);
+
+      const roomsMap = {};
+      roomsData?.forEach(r => roomsMap[r.id] = r.data);
+
+      // Auto Migrate from LocalStorage if Supabase is empty
+      if (!usersData || usersData.length === 0) {
+        console.log('Migrating users to Supabase...');
+        const savedUsers = localStorage.getItem('split_bill_users');
+        if (savedUsers) {
+          const parsed = JSON.parse(savedUsers);
+          for (const username of Object.keys(parsed)) {
+            await supabase.from('users').upsert({ username, data: parsed[username] });
+            usersMap[username] = parsed[username];
+          }
+        } else {
+           const adminData = { uid: '#ADMIN', pin: 'admin', bankName: '', bankAccount: '' };
+           await supabase.from('users').upsert({ username: 'admin', data: adminData });
+           usersMap['admin'] = adminData;
+        }
+      }
+
+      if (!roomsData || roomsData.length === 0) {
+        console.log('Migrating rooms to Supabase...');
+        const savedRooms = localStorage.getItem('split_bill_rooms');
+        if (savedRooms) {
+          const parsed = JSON.parse(savedRooms);
+          for (const roomId of Object.keys(parsed)) {
+            await supabase.from('rooms').upsert({ id: roomId, data: parsed[roomId] });
+            roomsMap[roomId] = parsed[roomId];
+          }
+        }
+      }
+
+      setRegisteredUsers(usersMap);
+      setRooms(roomsMap);
+      setIsReady(true);
+    };
+
+    fetchInitialData();
+
+    const usersSub = supabase.channel('users_channel')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, payload => {
+        if (payload.eventType === 'DELETE') {
+          setRegisteredUsers(prev => {
+            const next = { ...prev };
+            delete next[payload.old.username];
+            return next;
+          });
+        } else {
+          setRegisteredUsers(prev => ({
+            ...prev,
+            [payload.new.username]: payload.new.data
+          }));
+        }
+      }).subscribe();
+
+    const roomsSub = supabase.channel('rooms_channel')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, payload => {
+        if (payload.eventType === 'DELETE') {
+          setRooms(prev => {
+            const next = { ...prev };
+            delete next[payload.old.id];
+            return next;
+          });
+        } else {
+          setRooms(prev => ({
+            ...prev,
+            [payload.new.id]: payload.new.data
+          }));
+        }
+      }).subscribe();
+
+    return () => {
+      supabase.removeChannel(usersSub);
+      supabase.removeChannel(roomsSub);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (user) {
+      localStorage.setItem('split_bill_user', JSON.stringify(user));
+    } else {
+      localStorage.removeItem('split_bill_user');
+    }
   }, [user]);
 
-  useEffect(() => {
-    localStorage.setItem('split_bill_users', JSON.stringify(registeredUsers));
-  }, [registeredUsers]);
+  const updateSupabaseUser = async (username, data) => {
+    await supabase.from('users').upsert({ username, data });
+  };
 
-  useEffect(() => {
-    localStorage.setItem('split_bill_rooms', JSON.stringify(rooms));
-  }, [rooms]);
+  const updateSupabaseRoom = async (id, data) => {
+    await supabase.from('rooms').upsert({ id, data });
+  };
 
   const register = (username, pin) => {
     if (registeredUsers[username]) {
       return { success: false, message: 'Tên đăng nhập đã tồn tại!' };
     }
     const uid = '#' + Math.floor(1000 + Math.random() * 9000).toString();
-    setRegisteredUsers(prev => ({
-      ...prev,
-      [username]: { uid, pin, bankName: '', bankAccount: '' }
-    }));
+    const newUser = { uid, pin, bankName: '', bankAccount: '', qrImage: '' };
+    
+    setRegisteredUsers(prev => ({ ...prev, [username]: newUser }));
+    updateSupabaseUser(username, newUser);
     return { success: true, uid };
   };
 
   const login = (username, pin) => {
     const account = registeredUsers[username];
-    if (!account) {
-      return { success: false, message: 'Tài khoản không tồn tại. Vui lòng đăng ký!' };
-    }
-    if (account.pin !== pin) {
-      return { success: false, message: 'Sai mã PIN!' };
-    }
+    if (!account) return { success: false, message: 'Tài khoản không tồn tại. Vui lòng đăng ký!' };
+    if (account.pin !== pin) return { success: false, message: 'Sai mã PIN!' };
     
-    const loggedInUser = { username, uid: account.uid, pin, bankName: account.bankName, bankAccount: account.bankAccount };
-    setUser(loggedInUser);
+    setUser({ username, uid: account.uid, pin, bankName: account.bankName, bankAccount: account.bankAccount, qrImage: account.qrImage });
     setActiveRoomId(null);
     return { success: true };
   };
@@ -97,15 +140,13 @@ export function AppProvider({ children }) {
   const logout = () => {
     setUser(null);
     setActiveRoomId(null);
-    localStorage.removeItem('split_bill_user');
   };
 
   const updateProfile = (qrImage, bankBin = '', bankAccount = '') => {
     setUser(prev => ({ ...prev, qrImage, bankBin, bankAccount }));
-    setRegisteredUsers(prev => ({
-      ...prev,
-      [user.username]: { ...prev[user.username], qrImage, bankBin, bankAccount }
-    }));
+    const updatedData = { ...registeredUsers[user.username], qrImage, bankBin, bankAccount };
+    setRegisteredUsers(prev => ({ ...prev, [user.username]: updatedData }));
+    updateSupabaseUser(user.username, updatedData);
   };
 
   const createRoom = (name, memberUsernames) => {
@@ -118,107 +159,90 @@ export function AppProvider({ children }) {
     };
     setRooms(prev => ({ ...prev, [roomId]: newRoom }));
     setActiveRoomId(roomId);
+    updateSupabaseRoom(roomId, newRoom);
   };
 
   const addMemberToRoom = (roomId, username) => {
-    setRooms(prev => {
-      const room = prev[roomId];
-      if (room.members.includes(username)) return prev;
-      return {
-        ...prev,
-        [roomId]: {
-          ...room,
-          members: [...room.members, username]
-        }
-      };
-    });
+    const room = rooms[roomId];
+    if (room.members.includes(username)) return;
+    const updatedRoom = { ...room, members: [...room.members, username] };
+    setRooms(prev => ({ ...prev, [roomId]: updatedRoom }));
+    updateSupabaseRoom(roomId, updatedRoom);
   };
 
   const removeMemberFromRoom = (roomId, username) => {
-    setRooms(prev => {
-      const room = prev[roomId];
-      return {
-        ...prev,
-        [roomId]: {
-          ...room,
-          members: room.members.filter(m => m !== username),
-          bill: {
-            ...room.bill,
-            items: room.bill.items.map(item => ({
-              ...item,
-              assignedTo: item.assignedTo.filter(m => m !== username)
-            }))
-          }
-        }
-      };
-    });
+    const room = rooms[roomId];
+    const updatedRoom = {
+      ...room,
+      members: room.members.filter(m => m !== username),
+      bill: {
+        ...room.bill,
+        items: room.bill.items.map(item => ({
+          ...item,
+          assignedTo: item.assignedTo.filter(m => m !== username)
+        }))
+      }
+    };
+    setRooms(prev => ({ ...prev, [roomId]: updatedRoom }));
+    updateSupabaseRoom(roomId, updatedRoom);
   };
 
   const updateBillDetails = (name, vat, tip) => {
     if (!activeRoomId) return;
-    setRooms(prev => ({
-      ...prev,
-      [activeRoomId]: {
-        ...prev[activeRoomId],
-        bill: { ...prev[activeRoomId].bill, name, vat, tip }
-      }
-    }));
+    const room = rooms[activeRoomId];
+    const updatedRoom = {
+      ...room,
+      bill: { ...room.bill, name, vat, tip }
+    };
+    setRooms(prev => ({ ...prev, [activeRoomId]: updatedRoom }));
+    updateSupabaseRoom(activeRoomId, updatedRoom);
   };
 
   const addItem = (item) => {
     if (!activeRoomId) return;
-    setRooms(prev => {
-      const room = prev[activeRoomId];
-      return {
-        ...prev,
-        [activeRoomId]: {
-          ...room,
-          bill: { ...room.bill, items: [...room.bill.items, { ...item, id: Date.now().toString() }] }
-        }
-      };
-    });
+    const room = rooms[activeRoomId];
+    const updatedRoom = {
+      ...room,
+      bill: { ...room.bill, items: [...room.bill.items, { ...item, id: Date.now().toString() }] }
+    };
+    setRooms(prev => ({ ...prev, [activeRoomId]: updatedRoom }));
+    updateSupabaseRoom(activeRoomId, updatedRoom);
   };
 
   const removeItem = (id) => {
     if (!activeRoomId) return;
-    setRooms(prev => {
-      const room = prev[activeRoomId];
-      return {
-        ...prev,
-        [activeRoomId]: {
-          ...room,
-          bill: { ...room.bill, items: room.bill.items.filter(i => i.id !== id) }
-        }
-      };
-    });
+    const room = rooms[activeRoomId];
+    const updatedRoom = {
+      ...room,
+      bill: { ...room.bill, items: room.bill.items.filter(i => i.id !== id) }
+    };
+    setRooms(prev => ({ ...prev, [activeRoomId]: updatedRoom }));
+    updateSupabaseRoom(activeRoomId, updatedRoom);
   };
 
   const toggleItemAssignment = (itemId, participant) => {
     if (!activeRoomId) return;
-    setRooms(prev => {
-      const room = prev[activeRoomId];
-      return {
-        ...prev,
-        [activeRoomId]: {
-          ...room,
-          bill: {
-            ...room.bill,
-            items: room.bill.items.map(item => {
-              if (item.id === itemId) {
-                const hasParticipant = item.assignedTo.includes(participant);
-                return {
-                  ...item,
-                  assignedTo: hasParticipant 
-                    ? item.assignedTo.filter(p => p !== participant)
-                    : [...item.assignedTo, participant]
-                };
-              }
-              return item;
-            })
+    const room = rooms[activeRoomId];
+    const updatedRoom = {
+      ...room,
+      bill: {
+        ...room.bill,
+        items: room.bill.items.map(item => {
+          if (item.id === itemId) {
+            const hasParticipant = item.assignedTo.includes(participant);
+            return {
+              ...item,
+              assignedTo: hasParticipant 
+                ? item.assignedTo.filter(p => p !== participant)
+                : [...item.assignedTo, participant]
+            };
           }
-        }
-      };
-    });
+          return item;
+        })
+      }
+    };
+    setRooms(prev => ({ ...prev, [activeRoomId]: updatedRoom }));
+    updateSupabaseRoom(activeRoomId, updatedRoom);
   };
 
   const deleteUser = (usernameToDelete) => {
@@ -228,24 +252,36 @@ export function AppProvider({ children }) {
       delete next[usernameToDelete];
       return next;
     });
+    supabase.from('users').delete().eq('username', usernameToDelete);
+
     setRooms(prev => {
       const nextRooms = { ...prev };
       Object.keys(nextRooms).forEach(roomId => {
-         nextRooms[roomId].members = nextRooms[roomId].members.filter(m => m !== usernameToDelete);
-         nextRooms[roomId].bill.items = nextRooms[roomId].bill.items.map(item => ({
-           ...item,
-           assignedTo: item.assignedTo.filter(m => m !== usernameToDelete)
-         }));
+         const room = nextRooms[roomId];
+         if (room.members.includes(usernameToDelete)) {
+           const updatedRoom = {
+             ...room,
+             members: room.members.filter(m => m !== usernameToDelete),
+             bill: {
+               ...room.bill,
+               items: room.bill.items.map(item => ({
+                 ...item,
+                 assignedTo: item.assignedTo.filter(m => m !== usernameToDelete)
+               }))
+             }
+           };
+           nextRooms[roomId] = updatedRoom;
+           updateSupabaseRoom(roomId, updatedRoom);
+         }
       });
       return nextRooms;
     });
   };
 
   const changePin = (username, newPin) => {
-    setRegisteredUsers(prev => ({
-      ...prev,
-      [username]: { ...prev[username], pin: newPin }
-    }));
+    const updatedData = { ...registeredUsers[username], pin: newPin };
+    setRegisteredUsers(prev => ({ ...prev, [username]: updatedData }));
+    updateSupabaseUser(username, updatedData);
   };
 
   const calculateTotals = (roomId = activeRoomId) => {
@@ -262,7 +298,7 @@ export function AppProvider({ children }) {
     bill.items.forEach(item => {
       if (item.assignedTo.length === 0) return;
       
-      const payer = item.paidBy || room.members[0]; // Fallback to first member if undefined
+      const payer = item.paidBy || room.members[0]; 
       const itemTax = item.taxable ? item.price * (bill.vat / 100) : 0;
       const itemTip = item.price * (bill.tip / 100);
       const itemTotalCost = item.price + itemTax + itemTip;
@@ -288,12 +324,21 @@ export function AppProvider({ children }) {
     });
 
     room.members.forEach(p => {
-      totals[p].total = totals[p].totalConsumed; // Keep backward compatibility for SummaryView
+      totals[p].total = totals[p].totalConsumed; 
       totals[p].balance = totals[p].totalConsumed - totals[p].totalPaid;
     });
 
     return totals;
   };
+
+  if (!isReady) {
+    return (
+      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-color)', color: 'var(--primary)' }}>
+        <div className="spinner" style={{ width: '40px', height: '40px', border: '4px solid', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
+        <p style={{ marginTop: '1rem', fontWeight: 600 }}>Đang kết nối Máy chủ...</p>
+      </div>
+    );
+  }
 
   return (
     <AppContext.Provider value={{
