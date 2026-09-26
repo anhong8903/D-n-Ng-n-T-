@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../Store';
-import { Plus, Trash2, Users, Receipt, Search } from 'lucide-react';
+import { Plus, Trash2, Users, Receipt, Search, Wallet } from 'lucide-react';
 
 export default function BillView() {
   const { user, registeredUsers, rooms, activeRoomId, updateBillDetails, addItem, removeItem, toggleItemAssignment, addMemberToRoom, removeMemberFromRoom } = useApp();
@@ -10,6 +10,7 @@ export default function BillView() {
   const [newItemName, setNewItemName] = useState('');
   const [newItemPrice, setNewItemPrice] = useState('');
   const [newItemTaxable, setNewItemTaxable] = useState(true);
+  const [newItemPaidBy, setNewItemPaidBy] = useState(user.username);
   
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -34,11 +35,13 @@ export default function BillView() {
         name: newItemName.trim(),
         price: parseFloat(newItemPrice),
         taxable: newItemTaxable,
+        paidBy: newItemPaidBy,
         assignedTo: []
       });
       setNewItemName('');
       setNewItemPrice('');
       setNewItemTaxable(true);
+      // Keep newItemPaidBy as is, usually one person pays for multiple things at once
     }
   };
 
@@ -154,7 +157,7 @@ export default function BillView() {
               required
             />
           </div>
-          <div className="input-group mb-2">
+          <div className="input-group mb-3">
             <input 
               type="number" 
               placeholder="Giá tiền (VD: 250000)" 
@@ -162,6 +165,30 @@ export default function BillView() {
               onChange={(e) => setNewItemPrice(e.target.value)}
               required
             />
+          </div>
+          <div className="input-group mb-3">
+            <label style={{ fontSize: '0.9rem', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+              <Wallet size={16} /> Ai đã trả tiền món này?
+            </label>
+            <select 
+              value={newItemPaidBy}
+              onChange={(e) => setNewItemPaidBy(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '0.75rem',
+                borderRadius: '0.5rem',
+                border: '1px solid var(--glass-border)',
+                background: 'rgba(255,255,255,0.1)',
+                color: 'var(--text-color)',
+                outline: 'none'
+              }}
+            >
+              {room.members.map(m => (
+                <option key={m} value={m} style={{ color: '#000' }}>
+                  {m === user.username ? 'Tôi (' + m + ')' : m}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="flex-between mb-4">
             <div className="toggle-wrapper" onClick={() => setNewItemTaxable(!newItemTaxable)}>
@@ -185,6 +212,9 @@ export default function BillView() {
                   <strong style={{ fontSize: '1.1rem' }}>{item.name}</strong>
                   <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
                     {item.price.toLocaleString('vi-VN')} đ {item.taxable ? '(Có thuế)' : '(Không thuế)'}
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--primary)', marginTop: '0.25rem' }}>
+                    Người trả: <strong>{item.paidBy || room.members[0]}</strong>
                   </div>
                 </div>
                 <button 

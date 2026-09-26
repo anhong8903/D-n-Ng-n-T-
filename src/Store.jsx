@@ -255,44 +255,41 @@ export function AppProvider({ children }) {
     
     const bill = room.bill;
     const totals = {};
-    room.members.forEach(p => totals[p] = { itemsCost: 0, taxCost: 0, tipCost: 0, total: 0, items: [] });
-    
-    let totalTaxableItemsCost = 0;
-    let totalItemsCost = 0;
+    room.members.forEach(p => {
+      totals[p] = { itemsCost: 0, taxCost: 0, tipCost: 0, totalConsumed: 0, totalPaid: 0, balance: 0, items: [] };
+    });
 
     bill.items.forEach(item => {
       if (item.assignedTo.length === 0) return;
-      const costPerPerson = item.price / item.assignedTo.length;
-      totalItemsCost += item.price;
       
-      if (item.taxable) {
-        totalTaxableItemsCost += item.price;
+      const payer = item.paidBy || room.members[0]; // Fallback to first member if undefined
+      const itemTax = item.taxable ? item.price * (bill.vat / 100) : 0;
+      const itemTip = item.price * (bill.tip / 100);
+      const itemTotalCost = item.price + itemTax + itemTip;
+
+      if (totals[payer]) {
+        totals[payer].totalPaid += itemTotalCost;
       }
+
+      const numConsumers = item.assignedTo.length;
+      const baseShare = item.price / numConsumers;
+      const taxShare = itemTax / numConsumers;
+      const tipShare = itemTip / numConsumers;
 
       item.assignedTo.forEach(p => {
         if (totals[p]) {
-          totals[p].itemsCost += costPerPerson;
-          totals[p].items.push({ name: item.name, cost: costPerPerson, taxable: item.taxable });
+          totals[p].itemsCost += baseShare;
+          totals[p].taxCost += taxShare;
+          totals[p].tipCost += tipShare;
+          totals[p].totalConsumed += (baseShare + taxShare + tipShare);
+          totals[p].items.push({ name: item.name, cost: baseShare, taxable: item.taxable });
         }
       });
     });
 
-    const totalVatAmount = totalTaxableItemsCost * (bill.vat / 100);
-    const totalTipAmount = totalItemsCost * (bill.tip / 100);
-
     room.members.forEach(p => {
-      if (totalTaxableItemsCost > 0) {
-        const personTaxableCost = totals[p].items.filter(i => i.taxable).reduce((sum, i) => sum + i.cost, 0);
-        const taxShare = totalVatAmount * (personTaxableCost / totalTaxableItemsCost);
-        totals[p].taxCost = taxShare;
-      }
-
-      if (totalItemsCost > 0) {
-        const tipShare = totalTipAmount * (totals[p].itemsCost / totalItemsCost);
-        totals[p].tipCost = tipShare;
-      }
-
-      totals[p].total = totals[p].itemsCost + totals[p].taxCost + totals[p].tipCost;
+      totals[p].total = totals[p].totalConsumed; // Keep backward compatibility for SummaryView
+      totals[p].balance = totals[p].totalConsumed - totals[p].totalPaid;
     });
 
     return totals;
